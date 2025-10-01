@@ -24,35 +24,46 @@ def handle_webhook():
     company_name = data.get('company_name', 'Unknown Company')
     inn = data.get('INN', 'Unknown INN')
 
-    # Формируем промпт для OpenAI
+    # Формируем расширенный промпт для OpenAI с инструкцией по "поиску"
     prompt = (
-        f"Обработайте данные лида из Sensei: "
-        f"Lead ID: {lead_id}, "
-        f"Название компании: {company_name}, "
-        f"ИНН компании: {inn}. "
-        f"Дайте рекомендации по дальнейшим действиям."
+        f"Найди и обработай данные о компании:\n"
+        f"Название: {company_name}\n"
+        f"ИНН: {inn}\n\n"
+        f"Требуется собрать сведения из открытых источников (ФНС, Росстат, rusprofile.ru, СПАРК-Интерфакс или иные публичные базы):\n"
+        f"- Среднесписочная численность сотрудников (ССЧ)\n"
+        f"- Выручка (оборот) за 2024–2025 годы\n\n"
+        f"Если точных данных нет, приведи наиболее свежую доступную информацию, оценки по аналогичным компаниям и укажи ссылки на источники.\n\n"
+        f"Затем сделай краткие рекомендации по работе с этим клиентом на основе полученных данных "
+        f"(например: маленькая компания, средняя, крупная; перспективность для продаж)."
     )
+
 
     # Отправляем запрос в OpenAI API
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "You are a CRM assistant. Provide concise recommendations based on lead data."},
+        response = client.responses.create(
+            model="gpt-4o-mini",  # или "gpt-4o" для более точных результатов
+            input=[
+                {
+                    "role": "system",
+                    "content": "Ты — CRM-ассистент, который умеет использовать поиск по открытым источникам "
+                            "для сбора бизнес-данных. Отвечай кратко, но указывай ссылки на источники."
+                },
                 {"role": "user", "content": prompt}
-            ]
+            ],
+            tools=[{"type": "web_search_preview"}],  # включаем поиск
+            max_output_tokens=800
         )
         ai_response = response.choices[0].message.content.strip()
     except Exception as e:
         app.logger.error(f"OpenAI API error: {str(e)}")
         return jsonify({'error': 'Internal server error'}), 500
 
-    # Формируем JSON-ответ
+    # Формируем JSON-ответ (GPT сама предоставит данные в ответе)
     sensei_response = {
         'lead_id': lead_id,
         'company_name': company_name,
         'INN': inn,
-        'recommendation': ai_response,
+        'gpt_analysis': ai_response,  # Полный анализ от GPT (включая "найденные" данные и рекомендации)
         'processed_at': datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
     }
 
