@@ -50,13 +50,14 @@ def handle_webhook():
                 },
                 {"role": "user", "content": prompt}
             ],
-            tools=[{"type": "web_search_preview"}],  # включаем поиск
+            tools=[{"type": "web_search_preview"}],
+            tool_choice="auto",
             max_output_tokens=800
         )
-        ai_response = response.choices[0].message.content.strip()
+        ai_response = response.output_text.strip()
     except Exception as e:
         app.logger.error(f"OpenAI API error: {str(e)}")
-        return jsonify({'error': 'Internal server error'}), 500
+        return jsonify({'error': 'Upstream OpenAI API error'}), 502
 
     # Формируем JSON-ответ (GPT сама предоставит данные в ответе)
     sensei_response = {
