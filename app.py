@@ -12,27 +12,22 @@ client = OpenAI(api_key=os.environ.get('OPENAI_API_KEY'))
 
 @app.route('/webhook', methods=['POST'])
 def handle_webhook():
-    # Получаем данные из вебхука amoCRM
+    app.logger.info(f"Received request: {request.headers} | Body: {request.get_data(as_text=True)}")
+    # Получаем данные из тела запроса Sensei
     data = request.get_json(silent=True)
     if not data:
+        app.logger.error("Failed to parse JSON data")
         return jsonify({'error': 'Invalid or missing JSON data'}), 400
 
-    # Извлекаем основные поля из amoCRM
-    lead_id = data.get('id', 'Unknown Lead')
-    contact_name = data.get('name', 'Unknown Contact')
-    created_at = data.get('created_at', 'Unknown Date')
-
-    # Обработка кастомных полей
-    custom_fields = data.get('custom_fields_values', [])
-    company_name = next((field.get('values', [''])[0] for field in custom_fields if field.get('field_code') == 'COMPANY_NAME'), 'No Company')
-    inn = next((field.get('values', [''])[0] for field in custom_fields if field.get('field_code') == 'INN'), 'No INN')
+    # Извлекаем поля из тела запроса
+    lead_id = data.get('lead_id', 'Unknown Lead')
+    company_name = data.get('company_name', 'Unknown Company')
+    inn = data.get('INN', 'Unknown INN')
 
     # Формируем промпт для OpenAI
     prompt = (
-        f"Обработайте данные лида из amoCRM: "
+        f"Обработайте данные лида из Sensei: "
         f"Lead ID: {lead_id}, "
-        f"Имя контакта: {contact_name}, "
-        f"Дата создания: {created_at}, "
         f"Название компании: {company_name}, "
         f"ИНН компании: {inn}. "
         f"Дайте рекомендации по дальнейшим действиям."
@@ -52,7 +47,7 @@ def handle_webhook():
         app.logger.error(f"OpenAI API error: {str(e)}")
         return jsonify({'error': 'Internal server error'}), 500
 
-    # Формируем JSON-ответ для Sensei
+    # Формируем JSON-ответ
     sensei_response = {
         'lead_id': lead_id,
         'company_name': company_name,
