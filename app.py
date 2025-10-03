@@ -1,5 +1,6 @@
 import os
 import re
+import json
 from flask import Flask, request, jsonify
 from openai import OpenAI
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -16,30 +17,44 @@ def clean_string(value: str) -> str:
     """
     Очищаем строку:
     - убираем невидимые символы и пробелы по краям
-    - экранируем двойные кавычки для безопасного JSON и промптов
+    - экранируем двойные кавычки
     """
     if not isinstance(value, str):
         return value
-    # убираем thin space, non-breaking space, zero-width space
     cleaned = re.sub(r'[\u2009\u00A0\u200B]', '', value).strip()
-    # экранируем двойные кавычки
-    cleaned = cleaned.replace('"', '\\"')
+    cleaned = cleaned.replace('"', r'\"')
     return cleaned
+
+def fix_json_body(raw_body: str) -> str:
+    """
+    Исправляем JSON строку, чтобы внутренние двойные кавычки в company_name не ломали парсинг
+    """
+    # Экранируем двойные кавычки только внутри значения company_name
+    pattern = r'("company_name"\s*:\s*")(.+?)(")'
+    fixed_body = re.sub(
+        pattern,
+        lambda m: m.group(1) + m.group(2).replace('"', r'\"') + m.group(3),
+        raw_body
+    )
+    return fixed_body
 
 @app.route('/webhook', methods=['POST'])
 def handle_webhook():
     raw_body = request.get_data(as_text=True)
-    app.logger.info(f"Received request: {request.headers} | Body: {raw_body}")
+    app.logger.info(f"Received raw request body: {raw_body}")
 
-    # Получаем JSON (force=True на случай некорректного Content-Type)
+    # Попытка исправить JSON
+    fixed_body = fix_json_body(raw_body)
+
+    # Парсинг JSON
     try:
-        data = request.get_json(force=True, silent=False)
-    except Exception as e:
-        app.logger.error(f"JSON parse error: {e} | Raw body: {raw_body}")
-        return jsonify({'error': 'Invalid or missing JSON data'}), 400
+        data = json.loads(fixed_body)
+    except json.JSONDecodeError as e:
+        app.logger.error(f"JSON parse error after fixing: {e} | Fixed body: {fixed_body}")
+        return jsonify({'error': 'Invalid JSON data'}), 400
 
     if not data:
-        app.logger.error("No JSON data in request")
+        app.logger.error("No JSON data after fixing")
         return jsonify({'error': 'Invalid or missing JSON data'}), 400
 
     # Извлекаем и очищаем данные
@@ -50,7 +65,9 @@ def handle_webhook():
         app.logger.error("Missing company_name in request")
         return jsonify({'error': 'Missing company_name'}), 400
 
-    # Формируем промпт
+    app.logger.info(f"Cleaned data - lead_id: {lead_id}, company_name: {company_name}")
+
+    # Формируем промпт для OpenAI
     prompt = (
         f"Найди и обработай данные о компании:\n"
         f"Название: {company_name}\n\n"
