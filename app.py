@@ -1,4 +1,5 @@
 import os
+import re
 from flask import Flask, request, jsonify
 from openai import OpenAI
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -11,19 +12,33 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
 # Инициализация клиента OpenAI
 client = OpenAI(api_key=os.environ.get('OPENAI_API_KEY'))
 
+def clean_string(value: str) -> str:
+    """Удаляем невидимые символы и пробелы по краям."""
+    if not isinstance(value, str):
+        return value
+    # убираем пробелы, non-breaking space, thin space и др.
+    return re.sub(r'[\u2009\u00A0\u200B]', '', value).strip()
+
 @app.route('/webhook', methods=['POST'])
 def handle_webhook():
     app.logger.info(f"Received request: {request.headers} | Body: {request.get_data(as_text=True)}")
 
-    # Получаем JSON из тела запроса
-    data = request.get_json(silent=True)
-    if not data:
-        app.logger.error("Failed to parse JSON data")
+    # Получаем JSON (force=True подстрахует, если Content-Type некорректный)
+    try:
+        data = request.get_json(force=True, silent=False)
+    except Exception as e:
+        raw_body = request.get_data(as_text=True)
+        app.logger.error(f"JSON parse error: {e} | Raw body: {raw_body}")
         return jsonify({'error': 'Invalid or missing JSON data'}), 400
 
-    # Извлекаем данные
-    lead_id = data.get('lead_id', 'Unknown Lead')
-    company_name = data.get('company_name')
+    if not data:
+        app.logger.error("No JSON data in request")
+        return jsonify({'error': 'Invalid or missing JSON data'}), 400
+
+    # Извлекаем данные и чистим от скрытых символов
+    lead_id = clean_string(data.get('lead_id', 'Unknown Lead'))
+    company_name = clean_string(data.get('company_name', ''))
+
     if not company_name:
         app.logger.error("Missing company_name in request")
         return jsonify({'error': 'Missing company_name'}), 400
