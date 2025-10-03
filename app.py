@@ -13,21 +13,28 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
 client = OpenAI(api_key=os.environ.get('OPENAI_API_KEY'))
 
 def clean_string(value: str) -> str:
-    """Удаляем невидимые символы и пробелы по краям."""
+    """
+    Очищаем строку:
+    - убираем невидимые символы и пробелы по краям
+    - экранируем двойные кавычки для безопасного JSON и промптов
+    """
     if not isinstance(value, str):
         return value
-    # убираем пробелы, non-breaking space, thin space и др.
-    return re.sub(r'[\u2009\u00A0\u200B]', '', value).strip()
+    # убираем thin space, non-breaking space, zero-width space
+    cleaned = re.sub(r'[\u2009\u00A0\u200B]', '', value).strip()
+    # экранируем двойные кавычки
+    cleaned = cleaned.replace('"', '\\"')
+    return cleaned
 
 @app.route('/webhook', methods=['POST'])
 def handle_webhook():
-    app.logger.info(f"Received request: {request.headers} | Body: {request.get_data(as_text=True)}")
+    raw_body = request.get_data(as_text=True)
+    app.logger.info(f"Received request: {request.headers} | Body: {raw_body}")
 
-    # Получаем JSON (force=True подстрахует, если Content-Type некорректный)
+    # Получаем JSON (force=True на случай некорректного Content-Type)
     try:
         data = request.get_json(force=True, silent=False)
     except Exception as e:
-        raw_body = request.get_data(as_text=True)
         app.logger.error(f"JSON parse error: {e} | Raw body: {raw_body}")
         return jsonify({'error': 'Invalid or missing JSON data'}), 400
 
@@ -35,7 +42,7 @@ def handle_webhook():
         app.logger.error("No JSON data in request")
         return jsonify({'error': 'Invalid or missing JSON data'}), 400
 
-    # Извлекаем данные и чистим от скрытых символов
+    # Извлекаем и очищаем данные
     lead_id = clean_string(data.get('lead_id', 'Unknown Lead'))
     company_name = clean_string(data.get('company_name', ''))
 
